@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: docsmart
       POSTGRES_DB: docsmart
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - .:/docker-entrypoint-initdb.d
       - postgres_data:/var/lib/postgresql/data
