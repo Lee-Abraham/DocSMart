@@ -53,7 +53,7 @@ cd db
 docker compose up -d
 
 ### 3 Databas schema
-docker exec -it docsmart-postres psql -U docsmart -d docsmart
+docker exec -it docsmart-postgres psql -U docsmart -d docsmart
 \i schema.sql
 \q
 cd..

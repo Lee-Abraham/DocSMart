@@ -4,6 +4,7 @@ import Link from "next/link";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/useAuth";
+import { useRouter } from 'next/navigation';
 
 export default function Navbar() {
   const { user, loading } = useAuth();
@@ -114,6 +115,8 @@ function NavAction({
 /* ------------------ Profile Menu ------------------ */
 
 function ProfileMenu() {
+  const router = useRouter();
+
   return (
     <details className="relative">
       <summary
@@ -143,18 +146,18 @@ function ProfileMenu() {
       >
         <DropdownItem href="/profile">Profile</DropdownItem>
         <DropdownItem href="/settings">Settings</DropdownItem>
-
         <button
-          onClick={() => signOut(auth)}
-          className="
-            w-full text-left
-            px-4 py-2
-            text-sm text-red-600
-            hover:bg-gray-50
-          "
+          className=" hover:cursor-pointer hover:bg-gray-50 w-full text-left text-sm pb-3 pt-1.5 pl-4"
+          onClick={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            await signOut(auth);
+            router.push(""); // or "/"
+          }}
         >
           Logout
         </button>
+
       </div>
     </details>
   );

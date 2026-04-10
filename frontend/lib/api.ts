@@ -5,14 +5,17 @@ console.log("API BASE URL:", baseURL);
 
 const api = axios.create({
   baseURL,
-  headers: { "Content-Type": "application/json" },
 });
 
 // Optional: global error logging
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    console.error("API Error:", error.response?.data || error.message);
+    console.error("API Error", {
+  status: error.response?.status,
+  data: error.response?.data,
+  message: error.message,
+});
     return Promise.reject(error);
   }
 );

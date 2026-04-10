@@ -5,6 +5,7 @@ import Link from "next/link";
 import api from "@/lib/api";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
+import UploadSection from "@/app/components/documents/UploadSection";
 
 type Document = {
   id: string;
@@ -29,24 +30,43 @@ export default function DocumentsPage() {
   useEffect(() => {
     if (!userId) return;
 
-    api
-      .get("/documents", { params: { user_id: userId } })
-      .then((res) => setDocuments(res.data))
-      .finally(() => setLoading(false));
-  }, [userId]);
+  api
+    .get("/documents", { params: { user_id: userId } })
+    .then((res) => {
+      if (Array.isArray(res.data)) {
+        setDocuments(res.data);
+      } else {
+        console.warn("Documents API returned non-array:", res.data);
+        setDocuments([]);
+      }
+    })
+    .finally(() => setLoading(false));
+    }, [userId]);
 
   const guestLimitReached =
     isGuest && documents.length >= GUEST_LIMITS.documents;
+  
+  const handleDelete = async (documentId: string) => {
+    const confirmed = confirm(
+      "Are you sure you want to delete this document? This cannot be undone."
+    );
+    if (!confirmed) return;
 
+    await api.delete(`/documents/${documentId}`, {
+      params: { user_id: userId },
+    });
+
+    setDocuments((prev) =>
+      prev.filter((doc) => doc.id !== documentId)
+    );
+  };
   return (
-    <section className="max-w-6xl mx-auto space-y-8">
+    <section className="max-w-6xl mx-auto space-y-10">
       {/* ---------- Header ---------- */}
       <header className="space-y-1">
         <h1 className="text-3xl font-semibold">Documents</h1>
         <p className="text-sm text-textSecondary">
-          {isGuest
-            ? "Guest mode: upload 1 document."
-            : "Manage and access all your documents."}
+          Manage the documents that DocSMART can use to answer your questions.
         </p>
       </header>
 
@@ -54,7 +74,7 @@ export default function DocumentsPage() {
       {isGuest && (
         <div className="border border-dashed border-borderSubtle bg-gray-50 p-4 rounded-lg text-sm">
           You are in <strong>Guest Mode</strong>. Upload one document to try
-          DocSMart.{" "}
+          DocSMART.{" "}
           <Link href="/register" className="text-brand underline">
             Create an account
           </Link>{" "}
@@ -62,14 +82,35 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      {/* ---------- Upload Section ---------- */}
-      <UploadSection
-        disabled={guestLimitReached}
-        isGuest={isGuest}
-      />
+      {/* ---------- Upload Section (COMPONENT) ---------- */}
+      {userId && (
+        <UploadSection
+          userId={userId}
+          disabled={guestLimitReached}
+          isGuest={isGuest}
+          onUploaded={() => {
+            setLoading(true);
+            api
+              .get("/documents", { params: { user_id: userId } })
+              .then((res) => {
+                  if (Array.isArray(res.data)) {
+                    setDocuments(res.data);
+                  } else {
+                    console.warn("Documents API returned non-array:", res.data);
+                    setDocuments([]);
+                  }
+                })
+              .finally(() => setLoading(false));
+          }}
+        />
+      )}
 
-      {/* ---------- Document List ---------- */}
+      {/* ---------- Document Grid ---------- */}
       <div className="space-y-4">
+        <h2 className="text-xl font-medium">
+          Documents You Can Ask Questions About
+        </h2>
+
         {loading ? (
           <p className="text-textSecondary">Loading documents…</p>
         ) : documents.length === 0 ? (
@@ -77,78 +118,60 @@ export default function DocumentsPage() {
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {documents.map((doc) => (
-              <DocumentCard key={doc.id} document={doc} />
+              <DocumentCard key={doc.id} document={doc} onDelete={handleDelete} />
             ))}
           </div>
         )}
+      </div>
+
+      {/* ---------- Info Footer ---------- */}
+      <div className="border-t pt-6 text-sm text-textSecondary space-y-2">
+        <p>
+          Each document acts as a knowledge source. When you open a document,
+          you’ll be able to ask focused questions and receive answers grounded
+          specifically in that file.
+        </p>
+        <p>
+          Tip: Ask clear, specific questions for the most accurate results.
+        </p>
       </div>
     </section>
   );
 }
 
-function UploadSection({
-  disabled,
-  isGuest,
+function DocumentCard({
+  document,
+  onDelete,
 }: {
-  disabled: boolean;
-  isGuest: boolean;
+  document: Document;
+  onDelete: (id: string) => void;
 }) {
   return (
-    <div className="border border-borderSubtle rounded-xl bg-white p-6 space-y-3">
-      <h2 className="text-lg font-medium">Upload Document</h2>
+    <div className="bg-white border border-borderSubtle rounded-xl p-6 space-y-3 flex flex-col justify-between">
+      <Link href={`/documents/${document.id}`}>
+        <h3 className="font-medium truncate">{document.file_name}</h3>
+        <p className="text-xs text-textSecondary">
+          Uploaded {new Date(document.uploaded_at).toLocaleDateString()}
+        </p>
+      </Link>
 
       <button
-        disabled={disabled}
-        className={`px-4 py-2 border rounded-md text-sm
-          ${
-            disabled
-              ? "opacity-50 cursor-not-allowed"
-              : "hover:bg-gray-50"
-          }`}
+        onClick={() => onDelete(document.id)}
+        className="text-1xl bg-red-600 text-black hover:bg-red-700 rounded-4xl w-20 py-1 text-sm self-center"
       >
-        Upload PDF
+        Delete
       </button>
-
-      {disabled && isGuest && (
-        <p className="text-sm text-textSecondary">
-          Guest limit reached.{" "}
-          <Link href="/register" className="text-brand underline">
-            Sign up
-          </Link>{" "}
-          to upload more documents.
-        </p>
-      )}
     </div>
-  );
-}
-
-function DocumentCard({ document }: { document: Document }) {
-  return (
-    <Link
-      href={`/documents/${document.id}`}
-      className="
-        bg-white
-        border border-borderSubtle
-        rounded-xl
-        p-6
-        hover:shadow-sm
-        transition
-      "
-    >
-      <h3 className="font-medium truncate">{document.file_name}</h3>
-
-      <p className="text-xs text-textSecondary mt-2">
-        Uploaded{" "}
-        {new Date(document.uploaded_at).toLocaleDateString()}
-      </p>
-    </Link>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="border border-dashed border-borderSubtle p-12 rounded-xl text-center text-textSecondary">
-      No documents uploaded yet.
+    <div className="border border-dashed border-borderSubtle p-12 rounded-xl text-center text-textSecondary space-y-2">
+      <p>No documents uploaded yet.</p>
+      <p className="text-sm">
+        Upload a document to start asking questions.
+      </p>
     </div>
   );
 }

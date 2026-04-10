@@ -1,482 +1,347 @@
 import json
 import uuid
 import os
+import io
 import azure.functions as func
+import pdfplumber
+
+from email.parser import BytesParser
+from email.policy import default
+from openai import AzureOpenAI
 
 from shared.db import get_connection
 from shared.chunker import chunk_text
-from shared.embeddings import generate_embedding
 
+
+# ==================================================
+# CONFIG
+# ==================================================
+USE_REAL_AI = os.getenv("USE_REAL_AI", "false").lower() == "true"
+
+openai_client = None
+CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+
+if USE_REAL_AI:
+    openai_client = AzureOpenAI(
+        api_key=os.getenv("AZURE_OPENAI_KEY"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_version="2024-02-15-preview",
+    )
 
 app = func.FunctionApp()
 
-def call_llm(context, question):
-    """
-    Simple LLM call stub: combine retrieved context and question into a single string.
-    Replace this with a real LLM client call (OpenAI, Azure OpenAI, etc.) when needed.
-    """
-    if not context:
-        return f"Question: {question}\n\nNo contextual information available."
-    return "Context:\n\n" + "\n\n".join(context) + f"\n\nQuestion: {question}\n\nAnswer: (stubbed response)"
 
-# --------------------------------------------------
-# HEALTH CHECK
-# --------------------------------------------------
+# ==================================================
+# HEALTH
+# ==================================================
 @app.route(route="health", methods=["GET"])
 def health(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT 1;")
-        cur.fetchone()
-        cur.close()
-        conn.close()
-
-        return func.HttpResponse(
-            json.dumps({"status": "ok"}),
-            status_code=200,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+    return func.HttpResponse(
+        json.dumps({"status": "ok"}),
+        mimetype="application/json"
+    )
 
 
-# --------------------------------------------------
-# DOCUMENTS (UPLOAD + LIST)
-# --------------------------------------------------
-@app.route(route="documents", methods=["GET", "POST"])
+# ==================================================
+# LIST DOCUMENTS
+# ==================================================
+@app.route(route="documents", methods=["GET"])
 def documents(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        # ---------- POST: Upload document ----------
-        if req.method == "POST":
-            body = req.get_json()
+    user_id = req.params.get("user_id")
+    if not user_id:
+        return func.HttpResponse(
+            json.dumps({"error": "user_id is required"}),
+            status_code=400,
+            mimetype="application/json"
+        )
 
-            user_id = body.get("user_id")
-            file_name = body.get("file_name")
-            file_type = body.get("file_type")
-            blob_path = body.get("blob_path")
-            text = body.get("text")
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, file_name, file_type, uploaded_at
+        FROM documents
+        WHERE user_id = %s
+        ORDER BY uploaded_at DESC;
+        """,
+        (user_id,)
+    )
 
-            if not all([user_id, file_name, blob_path, text]):
-                return func.HttpResponse(
-                    json.dumps({"error": "Missing required fields"}),
-                    status_code=400,
-                    mimetype="application/json"
-                )
+    docs = cur.fetchall()
+    cur.close()
+    conn.close()
 
-            conn = get_connection()
-            cur = conn.cursor()
+    for d in docs:
+        d["uploaded_at"] = d["uploaded_at"].isoformat()
 
-            # Ensure user exists
-            cur.execute(
-                """
-                INSERT INTO users (id, email)
-                VALUES (%s, %s)
-                ON CONFLICT (id) DO NOTHING;
-                """,
-                (user_id, f"{user_id}@temp.docsmart")
-            )
+    return func.HttpResponse(json.dumps(docs), mimetype="application/json")
 
-            # Create document
-            document_id = str(uuid.uuid4())
-            cur.execute(
-                """
-                INSERT INTO documents (id, user_id, file_name, file_type, blob_path)
-                VALUES (%s, %s, %s, %s, %s);
-                """,
-                (document_id, user_id, file_name, file_type, blob_path)
-            )
 
-            # Chunk document
-            chunks = chunk_text(text)
+# ==================================================
+# DELETE DOCUMENT ✅ (FIXES YOUR 404)
+# ==================================================
+@app.route(route="documents/{document_id}", methods=["DELETE"])
+def delete_document(req: func.HttpRequest) -> func.HttpResponse:
+    document_id = req.route_params.get("document_id")
+    user_id = req.params.get("user_id")
 
-            for index, chunk in enumerate(chunks):
-                cur.execute(
-                    """
-                    INSERT INTO document_chunks (document_id, chunk_index, content)
-                    VALUES (%s, %s, %s);
-                    """,
-                    (document_id, index, chunk)
-                )
+    if not document_id or not user_id:
+        return func.HttpResponse(
+            json.dumps({"error": "document_id and user_id required"}),
+            status_code=400,
+            mimetype="application/json",
+        )
 
-            conn.commit()
-            cur.close()
-            conn.close()
+    conn = get_connection()
+    cur = conn.cursor()
 
-            return func.HttpResponse(
-                json.dumps({
-                    "message": "Document and chunks stored",
-                    "document_id": document_id,
-                    "total_chunks": len(chunks)
-                }),
-                status_code=201,
-                mimetype="application/json"
-            )
+    cur.execute(
+        "DELETE FROM documents WHERE id = %s AND user_id = %s;",
+        (document_id, user_id),
+    )
 
-        # ---------- GET: List documents ----------
-        user_id = req.params.get("user_id")
+    if cur.rowcount == 0:
+        conn.rollback()
+        return func.HttpResponse(
+            json.dumps({"error": "Not found or unauthorized"}),
+            status_code=404,
+            mimetype="application/json",
+        )
 
-        if not user_id:
-            return func.HttpResponse(
-                json.dumps({"error": "user_id is required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
+    conn.commit()
+    cur.close()
+    conn.close()
 
-        conn = get_connection()
-        cur = conn.cursor()
+    return func.HttpResponse(json.dumps({"status": "deleted"}), mimetype="application/json")
 
+
+# ==================================================
+# UPLOAD
+# ==================================================
+@app.route(route="upload", methods=["POST"])
+def upload(req: func.HttpRequest) -> func.HttpResponse:
+    content_type = req.headers.get("content-type")
+    raw = b"Content-Type: " + content_type.encode() + b"\n\n" + req.get_body()
+    msg = BytesParser(policy=default).parsebytes(raw)
+
+    file_part = None
+    user_id = "guest"
+
+    for part in msg.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        if name == "file":
+            file_part = part
+        elif name == "user_id":
+            user_id = part.get_content()
+
+    if not file_part:
+        return func.HttpResponse("No file provided", status_code=400)
+
+    pdf_bytes = file_part.get_payload(decode=True)
+    file_name = file_part.get_filename()
+
+    text = ""
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            if page.extract_text():
+                text += page.extract_text() + "\n"
+
+    if not text.strip():
+        return func.HttpResponse("No text extracted", status_code=400)
+
+    document_id = str(uuid.uuid4())
+    chunks = chunk_text(text)
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO users (id, email)
+        VALUES (%s, %s)
+        ON CONFLICT (id) DO NOTHING;
+        """,
+        (user_id, f"{user_id}@temp.docsmart"),
+    )
+
+    cur.execute(
+        """
+        INSERT INTO documents (id, user_id, file_name, file_type, blob_path)
+        VALUES (%s, %s, %s, %s, %s);
+        """,
+        (document_id, user_id, file_name, "pdf", "local"),
+    )
+
+    for i, chunk in enumerate(chunks):
         cur.execute(
             """
-            SELECT id, file_name, file_type, uploaded_at
-            FROM documents
-            WHERE user_id = %s
-            ORDER BY uploaded_at DESC;
+            INSERT INTO document_chunks (document_id, chunk_index, content)
+            VALUES (%s, %s, %s);
             """,
-            (user_id,)
+            (document_id, i, chunk),
         )
 
-        docs = cur.fetchall()
-        cur.close()
-        conn.close()
+    conn.commit()
+    cur.close()
+    conn.close()
 
-        return func.HttpResponse(
-            json.dumps(docs),
-            status_code=200,
-            mimetype="application/json"
-        )
-
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+    return func.HttpResponse(
+        json.dumps({
+            "document_id": document_id,
+            "file_name": file_name,
+            "total_chunks": len(chunks),
+        }),
+        status_code=201,
+        mimetype="application/json",
+    )
 
 
-# --------------------------------------------------
-# CHUNK TEST (DEBUG / DEMO)
-# --------------------------------------------------
-@app.route(route="chunk-test", methods=["POST"])
-def chunk_test(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        body = req.get_json()
-        text = body.get("text")
-
-        if not text:
-            return func.HttpResponse(
-                json.dumps({"error": "text is required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        chunks = chunk_text(text)
-
-        return func.HttpResponse(
-            json.dumps({
-                "total_chunks": len(chunks),
-                "chunks": chunks
-            }),
-            status_code=200,
-            mimetype="application/json"
-        )
-
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-# --------------------------------------------------
-# EMBED DOCUMENT (FAKE EMBEDDINGS)
-# --------------------------------------------------
-@app.route(route="embed-document", methods=["POST"])
-def embed_document(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        body = req.get_json()
-        document_id = body.get("document_id")
-
-        if not document_id:
-            return func.HttpResponse(
-                json.dumps({"error": "document_id is required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        conn = get_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT id
-            FROM document_chunks
-            WHERE document_id = %s
-            ORDER BY chunk_index;
-            """,
-            (document_id,)
-        )
-
-        chunks = cur.fetchall()
-
-        if not chunks:
-            return func.HttpResponse(
-                json.dumps({"error": "No chunks found for document"}),
-                status_code=404,
-                mimetype="application/json"
-            )
-
-        inserted = 0
-
-        for chunk in chunks:
-            embedding = generate_embedding(chunk["content"])
-            cur.execute(
-                """
-                INSERT INTO embeddings (chunk_id, embedding)
-                VALUES (%s, %s)
-                ON CONFLICT (chunk_id) DO NOTHING;
-                """,
-                (chunk["id"], embedding)
-            )
-            inserted += 1
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return func.HttpResponse(
-            json.dumps({
-                "message": "Embeddings stored",
-                "document_id": document_id,
-                "embeddings_created": inserted
-            }),
-            status_code=201,
-            mimetype="application/json"
-        )
-
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-# --------------------------------------------------
-# VECTOR SEARCH (RETRIEVAL)
-# --------------------------------------------------
-@app.route(route="search", methods=["POST"])
-def search(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        body = req.get_json()
-        document_id = body.get("document_id")
-        question = body.get("question")
-        limit = body.get("limit", 3)
-
-        if not document_id:
-            return func.HttpResponse(
-                json.dumps({"error": "document_id is required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        if not question:
-            return func.HttpResponse(
-                json.dumps({"error": "question is required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        query_embedding = generate_embedding(question)
-
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        cur.execute(
-            """
-            SELECT dc.chunk_index, dc.content
-            FROM embeddings e
-            JOIN document_chunks dc ON dc.id = e.chunk_id
-            WHERE dc.document_id = %s
-            ORDER BY e.embedding <=> %s::vector
-            LIMIT %s;
-            """,
-            (document_id, query_embedding, limit)
-        )
-
-        results = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        return func.HttpResponse(
-            json.dumps({
-                "document_id": document_id,
-                "results": results
-            }),
-            status_code=200,
-            mimetype="application/json"
-        )
-
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
+# ==================================================
+# ASK (NO EMBEDDINGS, USE AI)
+# ==================================================
 @app.route(route="ask", methods=["POST"])
 def ask(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        body = req.get_json()
-        document_id = body.get("document_id")
-        question = body.get("question")
-        user_id = body.get("user_id", "anonymous")
+    body = req.get_json()
+    document_id = body.get("document_id")
+    question = body.get("question")
+    user_id = body.get("user_id", "guest")
 
-        if not document_id or not question:
-            return func.HttpResponse(
-                json.dumps({"error": "document_id and question are required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        conn = get_connection()
-        cur = conn.cursor()
-
-        # ------------------------------------------------
-        # RETRIEVAL‑ONLY MODE (NO VECTOR OPS)
-        # ------------------------------------------------
-        if os.getenv("USE_REAL_AI", "false").lower() != "true":
-            cur.execute(
-                """
-                SELECT content
-                FROM document_chunks
-                WHERE document_id = %s
-                ORDER BY chunk_index
-                LIMIT 4;
-                """,
-                (document_id,)
-            )
-
-            chunks = cur.fetchall()
-            context = [c["content"] for c in chunks]
-
-        # -------------------------------
-        # Retrieval-only mode (NO AI)
-        # -------------------------------
-        if os.getenv("USE_REAL_AI", "false").lower() != "true":
-            answer = "\n\n".join(context)
-
-            cur.execute(
-                """
-                INSERT INTO qa_history (user_id, document_id, question, answer)
-                VALUES (%s, %s, %s, %s);
-                """,
-                (user_id, document_id, question, answer)
-            )
-
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            return func.HttpResponse(
-                json.dumps({
-                    "mode": "retrieval",
-                    "question": question,
-                    "context": context
-                }),
-                status_code=200,
-                mimetype="application/json"
-            )
-
-        # -------------------------------
-        # AI-enabled mode (FUTURE)
-        # -------------------------------
-        answer = call_llm(context, question)
-
-        cur.execute(
-            """
-            INSERT INTO qa_history (user_id, document_id, question, answer)
-            VALUES (%s, %s, %s, %s);
-            """,
-            (user_id, document_id, question, answer)
-        )
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
+    if not document_id or not question:
         return func.HttpResponse(
-            json.dumps({
-                "mode": "ai",
-                "question": question,
-                "answer": answer
-            }),
-            status_code=200,
-            mimetype="application/json"
+            json.dumps({"error": "document_id and question required"}),
+            status_code=400,
+            mimetype="application/json",
         )
 
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+    conn = get_connection()
+    cur = conn.cursor()
 
+    cur.execute(
+        """
+        SELECT content
+        FROM document_chunks
+        WHERE document_id = %s
+        ORDER BY chunk_index
+        LIMIT 4;
+        """,
+        (document_id,),
+    )
+
+    chunks = cur.fetchall()
+    context = "\n\n".join(c["content"] for c in chunks)
+
+    if not USE_REAL_AI:
+        answer = context
+    else:
+        prompt = f"""
+You are an AI assistant answering ONLY using the document content below.
+
+Document:
+{context}
+
+Question:
+{question}
+"""
+        response = openai_client.chat.completions.create(
+            model=CHAT_DEPLOYMENT,
+            messages=[
+                {"role": "system", "content": "Answer using only the document."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_tokens=500,
+        )
+        answer = response.choices[0].message.content
+
+    cur.execute(
+        """
+        INSERT INTO qa_history (user_id, document_id, question, answer)
+        VALUES (%s, %s, %s, %s);
+        """,
+        (user_id, document_id, question, answer),
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return func.HttpResponse(
+        json.dumps({"question": question, "answer": answer}),
+        mimetype="application/json",
+    )
+
+
+# ==================================================
+# HISTORY
+# ==================================================
 @app.route(route="history", methods=["GET"])
 def history(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        user_id = req.params.get("user_id")
-        limit = int(req.params.get("limit", 20))
-
-        if not user_id:
-            return func.HttpResponse(
-                json.dumps({"error": "user_id is required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        conn = get_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT
-                q.id,
-                q.document_id,
-                d.file_name,
-                q.question,
-                q.answer,
-                q.created_at
-            FROM qa_history q
-            JOIN documents d ON d.id = q.document_id
-            WHERE q.user_id = %s
-            ORDER BY q.created_at DESC
-            LIMIT %s;
-            """,
-            (user_id, limit)
-        )
-
-        history = cur.fetchall()
-        cur.close()
-        conn.close()
-
+    user_id = req.params.get("user_id")
+    if not user_id:
         return func.HttpResponse(
-            json.dumps({
-                "user_id": user_id,
-                "history": history
-            }),
-            status_code=200,
-            mimetype="application/json"
+            json.dumps({"error": "user_id required"}),
+            status_code=400,
+            mimetype="application/json",
         )
 
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT q.id, d.file_name, q.question, q.answer, q.created_at
+        FROM qa_history q
+        JOIN documents d ON d.id = q.document_id
+        WHERE q.user_id = %s
+        ORDER BY q.created_at DESC;
+        """,
+        (user_id,),
+    )
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    for r in rows:
+        r["created_at"] = r["created_at"].isoformat()
+
+    return func.HttpResponse(json.dumps({"history": rows}), mimetype="application/json")
+
+
+# ==================================================
+# DELETE HISTORY ITEM
+# ==================================================
+@app.route(route="history/{history_id}", methods=["DELETE"])
+def delete_history(req: func.HttpRequest) -> func.HttpResponse:
+    history_id = req.route_params.get("history_id")
+    user_id = req.params.get("user_id")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "DELETE FROM qa_history WHERE id = %s AND user_id = %s;",
+        (history_id, user_id),
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return func.HttpResponse(json.dumps({"status": "deleted"}), mimetype="application/json")
+
+
+# ==================================================
+# CLEAR HISTORY
+# ==================================================
+@app.route(route="history", methods=["DELETE"])
+def clear_history(req: func.HttpRequest) -> func.HttpResponse:
+    user_id = req.params.get("user_id")
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM qa_history WHERE user_id = %s;", (user_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return func.HttpResponse(json.dumps({"status": "cleared"}), mimetype="application/json")
