@@ -19,24 +19,19 @@ from shared.chunker import chunk_text
 
 
 # ==================================================
-# APP INIT — MUST BE AT IMPORT TIME
+# APP INIT — MUST NEVER FAIL
 # ==================================================
 app = func.FunctionApp()
 
 
 # ==================================================
-# FIREBASE (LAZY INIT — CRITICAL FOR FLEX)
+# FIREBASE (LAZY + SAFE INIT)
 # ==================================================
 _firebase_initialized = False
 
 
 def init_firebase():
-    """
-    Initializes Firebase ONLY when first needed.
-    Prevents Azure Functions from crashing during import/indexing.
-    """
     global _firebase_initialized
-
     if _firebase_initialized:
         return
 
@@ -44,20 +39,22 @@ def init_firebase():
     private_key = os.getenv("FIREBASE_PRIVATE_KEY")
     client_email = os.getenv("FIREBASE_CLIENT_EMAIL")
 
-    # If vars are missing, skip init (functions still load)
     if not project_id or not private_key or not client_email:
         return
 
-    cred = credentials.Certificate({
-        "type": "service_account",
-        "project_id": project_id,
-        "private_key": private_key.replace("\\n", "\n"),
-        "client_email": client_email,
-        "token_uri": "https://oauth2.googleapis.com/token",
-    })
-
-    firebase_admin.initialize_app(cred)
-    _firebase_initialized = True
+    try:
+        cred = credentials.Certificate({
+            "type": "service_account",
+            "project_id": project_id,
+            "private_key": private_key.replace("\\n", "\n"),
+            "client_email": client_email,
+            "token_uri": "https://oauth2.googleapis.com/token",
+        })
+        firebase_admin.initialize_app(cred)
+        _firebase_initialized = True
+    except Exception:
+        # NEVER allow Firebase init to kill function discovery
+        pass
 
 
 def get_authenticated_user(req: func.HttpRequest):
@@ -77,38 +74,46 @@ def get_authenticated_user(req: func.HttpRequest):
 
 
 # ==================================================
-# OPENAI CONFIG (SAFE AT IMPORT)
+# OPENAI (LAZY + SAFE INIT)
 # ==================================================
 USE_REAL_AI = os.getenv("USE_REAL_AI", "false").lower() == "true"
 CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
-
 openai_client = None
-if USE_REAL_AI:
-    openai_client = AzureOpenAI(
-        api_key=os.getenv("AZURE_OPENAI_KEY"),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_version="2024-02-15-preview",
-    )
+
+
+def init_openai():
+    global openai_client
+    if openai_client is not None or not USE_REAL_AI:
+        return
+
+    try:
+        openai_client = AzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_version="2024-02-15-preview",
+        )
+    except Exception:
+        openai_client = None
 
 
 # ==================================================
-# HEALTH (PUBLIC — ALWAYS LOADS)
+# HEALTH (PUBLIC)
 # ==================================================
 @app.function_name(name="health")
 @app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def health(req: func.HttpRequest) -> func.HttpResponse:
+def health(req: func.HttpRequest):
     return func.HttpResponse(
-        json.dumps({ "status": "ok" }),
+        json.dumps({"status": "ok"}),
         mimetype="application/json",
     )
 
 
 # ==================================================
-# LIST DOCUMENTS (AUTH)
+# LIST DOCUMENTS
 # ==================================================
 @app.function_name(name="documents")
 @app.route(route="documents", methods=["GET"])
-def list_documents(req: func.HttpRequest) -> func.HttpResponse:
+def list_documents(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
     except Exception as e:
@@ -138,50 +143,11 @@ def list_documents(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ==================================================
-# DELETE DOCUMENT
-# ==================================================
-@app.function_name(name="delete_document")
-@app.route(route="documents/{document_id}", methods=["DELETE"])
-def delete_document(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        user = get_authenticated_user(req)
-    except Exception as e:
-        return func.HttpResponse(str(e), status_code=401)
-
-    document_id = req.route_params.get("document_id")
-
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
-        "DELETE FROM documents WHERE id = %s AND user_id = %s;",
-        (document_id, user["uid"]),
-    )
-
-    if cur.rowcount == 0:
-        conn.rollback()
-        return func.HttpResponse(
-            json.dumps({"error": "Not found or unauthorized"}),
-            status_code=404,
-            mimetype="application/json",
-        )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return func.HttpResponse(
-        json.dumps({ "status": "deleted" }),
-        mimetype="application/json",
-    )
-
-
-# ==================================================
 # UPLOAD DOCUMENT
 # ==================================================
 @app.function_name(name="upload")
 @app.route(route="upload", methods=["POST"])
-def upload(req: func.HttpRequest) -> func.HttpResponse:
+def upload(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
     except Exception as e:
@@ -259,11 +225,11 @@ def upload(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ==================================================
-# ASK QUESTION
+# ASK
 # ==================================================
 @app.function_name(name="ask")
 @app.route(route="ask", methods=["POST"])
-def ask(req: func.HttpRequest) -> func.HttpResponse:
+def ask(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
     except Exception as e:
@@ -300,6 +266,10 @@ def ask(req: func.HttpRequest) -> func.HttpResponse:
     if not USE_REAL_AI:
         answer = context
     else:
+        init_openai()
+        if openai_client is None:
+            return func.HttpResponse("AI unavailable", status_code=503)
+
         prompt = f"""
 You are an AI assistant answering ONLY using the document content below.
 
@@ -334,43 +304,5 @@ Question:
 
     return func.HttpResponse(
         json.dumps({"question": question, "answer": answer}),
-        mimetype="application/json",
-    )
-
-
-# ==================================================
-# HISTORY
-# ==================================================
-@app.function_name(name="history")
-@app.route(route="history", methods=["GET"])
-def history(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        user = get_authenticated_user(req)
-    except Exception as e:
-        return func.HttpResponse(str(e), status_code=401)
-
-    conn = get_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    cur.execute(
-        """
-        SELECT q.id, d.file_name, q.question, q.answer, q.created_at
-        FROM qa_history q
-        JOIN documents d ON d.id = q.document_id
-        WHERE q.user_id = %s
-        ORDER BY q.created_at DESC;
-        """,
-        (user["uid"],),
-    )
-
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    for r in rows:
-        r["created_at"] = r["created_at"].isoformat()
-
-    return func.HttpResponse(
-        json.dumps({ "history": rows }),
         mimetype="application/json",
     )
