@@ -4,32 +4,29 @@ import { useRef } from "react";
 import api from "@/lib/api";
 
 type UploadSectionProps = {
-  userId: string;
   disabled: boolean;
   isGuest: boolean;
   onUploaded?: () => void;
 };
 
 export default function UploadSection({
-  userId,
   disabled,
   isGuest,
   onUploaded,
 }: UploadSectionProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("user_id", userId);
 
     await api.post("/upload", formData);
 
     onUploaded?.();
-    };
+};
 
   return (
     <div className="border border-borderSubtle rounded-xl bg-white p-6 space-y-3">

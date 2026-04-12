@@ -5,18 +5,26 @@ import api from "@/lib/api";
 import { useAuth } from "@/lib/useAuth";
 import { useSearchParams } from "next/navigation";
 
-export default function SettingsPage() {
-  const { user } = useAuth();
+export default function SettingsClient() {
+  const { user, loading: authLoading, isGuest } = useAuth();
   const searchParams = useSearchParams();
 
-  const isGuest = searchParams.get("mode") === "guest";
-  const userId = isGuest ? "guest" : user?.uid;
+  const isGuestMode = isGuest || searchParams.get("mode") === "guest";
+
+  /* ---------- AUTH GUARD ---------- */
+  if (authLoading) {
+    return <p className="text-textSecondary">Loading session…</p>;
+  }
+
+  if (!user) {
+    return <p>Please sign in.</p>;
+  }
 
   /* ---------- Local‑only settings ---------- */
   const [autoOpenAsk, setAutoOpenAsk] = useState(true);
   const [showExamples, setShowExamples] = useState(true);
 
-  /* Load saved preferences */
+  /* Load preferences */
   useEffect(() => {
     const savedAutoOpen = localStorage.getItem("autoOpenAsk");
     const savedExamples = localStorage.getItem("showExamples");
@@ -45,9 +53,7 @@ export default function SettingsPage() {
     );
     if (!confirmClear) return;
 
-    await api.delete("/history", {
-      params: { user_id: userId },
-    });
+    await api.delete("/history");
 
     alert("Your question history has been cleared.");
   };
@@ -89,11 +95,11 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* ---------- Account / Session Info ---------- */}
+      {/* ---------- Session Info ---------- */}
       <div className="border rounded-xl p-6 bg-white space-y-3">
         <h2 className="text-lg font-medium">Session Information</h2>
 
-        {isGuest ? (
+        {isGuestMode ? (
           <p className="text-sm text-textSecondary">
             You are using DocSMART in <strong>Guest Mode</strong>. Your uploaded
             documents and questions may not persist once you leave the session.
@@ -107,20 +113,22 @@ export default function SettingsPage() {
       </div>
 
       {/* ---------- Danger Zone ---------- */}
-      <div className="border border-red-200 rounded-xl p-6 bg-red-50 space-y-3">
-        <h2 className="text-lg font-medium text-red-700">Danger Zone</h2>
+      {!isGuestMode && (
+        <div className="border border-red-200 rounded-xl p-6 bg-red-50 space-y-3">
+          <h2 className="text-lg font-medium text-red-700">Danger Zone</h2>
 
-        <p className="text-sm text-red-700">
-          This action permanently removes data and cannot be undone.
-        </p>
+          <p className="text-sm text-red-700">
+            This action permanently removes data and cannot be undone.
+          </p>
 
-        <button
-          onClick={handleClearHistory}
-          className="text-sm bg-red-500 text-white hover:bg-red-600 rounded-md px-4 py-2"
-        >
-          Clear history
-        </button>
-      </div>
+          <button
+            onClick={handleClearHistory}
+            className="text-sm bg-red-500 text-white hover:bg-red-600 rounded-md px-4 py-2"
+          >
+            Clear history
+          </button>
+        </div>
+      )}
     </section>
   );
 }

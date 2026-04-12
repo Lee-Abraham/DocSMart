@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getAuth } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 
 const baseURL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -9,17 +9,26 @@ if (!baseURL) {
 
 const api = axios.create({
   baseURL,
+  timeout: 30_000,
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
-//Attach Firebase ID token to every request
+// Attach Firebase ID token to every request
 api.interceptors.request.use(
   async (config) => {
-    const auth = getAuth();
     const user = auth.currentUser;
 
     if (user) {
-      const token = await user.getIdToken();
-      config.headers.Authorization = `Bearer ${token}`;
+      // Force refresh if token is expired
+      const token = await user.getIdToken(true);
+
+      if (!config.headers) {
+        // Initialize headers as a plain object and cast to any to satisfy AxiosRequestHeaders type
+        config.headers = {} as any;
+      }
+      (config.headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
 
     return config;
@@ -27,15 +36,17 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-//Global response error logging (good practice)
+// Global response error logging
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     console.error("API Error", {
+      url: error.config?.url,
       status: error.response?.status,
       data: error.response?.data,
       message: error.message,
     });
+
     return Promise.reject(error);
   }
 );

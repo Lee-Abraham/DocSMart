@@ -152,7 +152,7 @@ function ProfileMenu() {
             e.preventDefault();
             e.stopPropagation();
             await signOut(auth);
-            router.push(""); // or "/"
+            router.push("/"); // or "/"
           }}
         >
           Logout

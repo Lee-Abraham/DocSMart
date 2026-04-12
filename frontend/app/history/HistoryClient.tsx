@@ -14,27 +14,40 @@ type HistoryItem = {
   created_at: string;
 };
 
-export default function HistoryPage() {
-  const { user } = useAuth();
+export default function HistoryClient() {
+  const { user, loading: authLoading, isGuest } = useAuth();
   const searchParams = useSearchParams();
 
-  const isGuest = searchParams.get("mode") === "guest";
-  const userId = isGuest ? "guest" : user?.uid;
+  const isGuestMode = isGuest || searchParams.get("mode") === "guest";
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
 
+  /* ---------- AUTH GUARD ---------- */
+  if (authLoading) {
+    return <p className="text-textSecondary">Loading session…</p>;
+  }
+
+  if (!user) {
+    return <p>Please sign in.</p>;
+  }
+
+  /* ---------- LOAD HISTORY ---------- */
   useEffect(() => {
-    if (!userId) return;
+    if (authLoading || !user || isGuestMode) {
+      setDataLoading(false);
+      return;
+    }
+
+    setDataLoading(true);
 
     api
       .get("/history")
       .then((res) => {
         setHistory(res.data?.history ?? []);
       })
-      .finally(() => setLoading(false));
-  }, [userId]);
-
+      .finally(() => setDataLoading(false));
+  }, [authLoading, user, isGuestMode]);
 
   const handleDelete = async (historyId: string) => {
     const confirmed = confirm(
@@ -44,7 +57,6 @@ export default function HistoryPage() {
 
     await api.delete(`/history/${historyId}`);
 
-    //Update UI immediately
     setHistory((prev) =>
       prev.filter((item) => item.id !== historyId)
     );
@@ -61,10 +73,10 @@ export default function HistoryPage() {
       </header>
 
       {/* ---------- Content ---------- */}
-      {loading ? (
+      {dataLoading ? (
         <p className="text-textSecondary">Loading history…</p>
       ) : history.length === 0 ? (
-        <EmptyHistoryState isGuest={isGuest} />
+        <EmptyHistoryState isGuest={isGuestMode} />
       ) : (
         <div className="space-y-4">
           {history.map((item) => (
@@ -80,14 +92,13 @@ export default function HistoryPage() {
                   {new Date(item.created_at).toLocaleDateString()}
                 </span>
               </div>
-              
+
               <button
                 onClick={() => handleDelete(item.id)}
-                className="text-1xl bg-red-500 text-black hover:bg-red-600 rounded-4xl w-20 py-1 text-sm self-center"
+                className="bg-red-500 text-black hover:bg-red-600 rounded-md px-3 py-1 text-sm"
               >
                 Remove
               </button>
-
             </div>
           ))}
         </div>
@@ -96,7 +107,7 @@ export default function HistoryPage() {
   );
 }
 
-/* ---------- Empty State Component ---------- */
+/* ---------- Empty State ---------- */
 
 function EmptyHistoryState({ isGuest }: { isGuest: boolean }) {
   return (
@@ -110,7 +121,7 @@ function EmptyHistoryState({ isGuest }: { isGuest: boolean }) {
       </p>
 
       <div className="text-sm space-y-1">
-        <p className="font-medium text-textSecondary">Try questions like:</p>
+        <p className="font-medium">Try questions like:</p>
         <p>• “Summarize this document”</p>
         <p>• “What are the key points?”</p>
         <p>• “Explain this section simply”</p>

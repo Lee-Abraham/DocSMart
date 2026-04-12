@@ -8,35 +8,41 @@ import { useAuth } from "@/lib/useAuth";
 type QAItem = {
   question: string;
   answer: string;
-  created_at?: string;
 };
 
-export default function AskDocumentPage() {
+export default function AskDocumentClient() {
   const { id: documentId } = useParams<{ id: string }>();
-  const { user } = useAuth();
-  const userId = user?.uid ?? "guest";
+  const { user, loading: authLoading } = useAuth();
 
-  const [documentName, setDocumentName] = useState<string>("Document");
+  const [documentName, setDocumentName] = useState("Document");
   const [question, setQuestion] = useState("");
   const [answers, setAnswers] = useState<QAItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  //Load document name
+  /* ---------- AUTH GUARD ---------- */
+  if (authLoading) {
+    return <p className="text-textSecondary">Loading session…</p>;
+  }
+
+  if (!user) {
+    return <p>Please sign in to ask questions.</p>;
+  }
+
+  /* ---------- LOAD DOCUMENT NAME ---------- */
   useEffect(() => {
-    if (!userId) return;
+    if (authLoading || !user || !documentId) return;
 
-    api
-      .get("/documents")
-      .then((res) => {
-        if (Array.isArray(res.data)) {
-          const doc = res.data.find((d: any) => d.id === documentId);
-          if (doc) setDocumentName(doc.file_name);
-        }
-      });
-  }, [userId, documentId]);
+    api.get("/documents").then((res) => {
+      if (Array.isArray(res.data)) {
+        const doc = res.data.find((d: any) => d.id === documentId);
+        if (doc) setDocumentName(doc.file_name);
+      }
+    });
+  }, [authLoading, user, documentId]);
 
+  /* ---------- ASK HANDLER ---------- */
   const handleAsk = async () => {
-    if (!question.trim()) return;
+    if (!question.trim() || !user) return;
 
     setLoading(true);
 
@@ -53,10 +59,7 @@ export default function AskDocumentPage() {
 
       setAnswers((prev) => [
         ...prev,
-        {
-          question,
-          answer: answerText,
-        },
+        { question, answer: answerText },
       ]);
 
       setQuestion("");

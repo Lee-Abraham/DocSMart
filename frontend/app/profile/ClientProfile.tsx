@@ -1,34 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/useAuth";
 import { useSearchParams } from "next/navigation";
-import Link from "next/dist/client/link";
 
 type UserProfile = {
   email: string;
   created_at: string;
 };
 
-export default function ProfilePage() {
-  const { user } = useAuth();
-  const email = user?.email;
+export default function ProfileClient() {
+  const { user, loading: authLoading, isGuest } = useAuth();
   const searchParams = useSearchParams();
 
-  const isGuest = searchParams.get("mode") === "guest";
-  const userId = isGuest ? "guest" : user?.uid;
+  const isGuestMode = isGuest || searchParams.get("mode") === "guest";
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [documentCount, setDocumentCount] = useState(0);
   const [questionCount, setQuestionCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
 
+  /* ---------- AUTH GUARD ---------- */
+  if (authLoading) {
+    return <p className="text-textSecondary">Loading session…</p>;
+  }
+
+  if (!user) {
+    return <p>Please sign in.</p>;
+  }
+
+  /* ---------- LOAD PROFILE DATA ---------- */
   useEffect(() => {
-    if (!userId || isGuest) {
-      setLoading(false);
+    if (authLoading || !user || isGuestMode) {
+      setDataLoading(false);
       return;
     }
+
+    setDataLoading(true);
 
     Promise.all([
       api.get("/user"),
@@ -40,8 +50,8 @@ export default function ProfilePage() {
         setDocumentCount(Array.isArray(docsRes.data) ? docsRes.data.length : 0);
         setQuestionCount(historyRes.data?.history?.length ?? 0);
       })
-      .finally(() => setLoading(false));
-  }, [userId, isGuest]);
+      .finally(() => setDataLoading(false));
+  }, [authLoading, user, isGuestMode]);
 
   return (
     <section className="max-w-4xl mx-auto space-y-10">
@@ -54,37 +64,37 @@ export default function ProfilePage() {
       </header>
 
       {/* ---------- Guest Profile ---------- */}
-      {isGuest ? (
+      {isGuestMode ? (
         <div className="border border-dashed rounded-xl p-8 bg-gray-50 space-y-3">
           <h2 className="text-lg font-medium">Guest User</h2>
           <p className="text-sm text-textSecondary">
             You are currently using DocSMART in Guest Mode. Your data may be
             cleared when you leave the session.
           </p>
-            <Link
+          <Link
             href="/register"
             className="inline-block text-sm text-brand underline"
-            >
-                Create an account
-            </Link>
+          >
+            Create an account
+          </Link>
         </div>
-      ) : loading ? (
+      ) : dataLoading ? (
         <p className="text-textSecondary">Loading profile…</p>
       ) : (
         <>
-          {/* ---------- Basic Info ---------- */}
+          {/* ---------- Account Info ---------- */}
           <div className="border rounded-xl p-6 bg-white space-y-3">
             <h2 className="text-lg font-medium">Account Information</h2>
 
             <div className="text-sm space-y-1">
               <p>
                 <span className="text-textSecondary">Email:</span>{" "}
-                {email ?? "—"}
+                {user.email ?? "—"}
               </p>
 
               <p>
                 <span className="text-textSecondary">Account ID:</span>{" "}
-                {userId?.slice(0, 8)}…
+                {user.uid.slice(0, 8)}…
               </p>
 
               <p>
@@ -118,7 +128,7 @@ export default function ProfilePage() {
             <h2 className="text-lg font-medium">Account Details</h2>
             <p className="text-sm text-textSecondary">
               Your documents and question history are securely associated with
-              your account and will be available whenever you sign in.
+              your account and available whenever you sign in.
             </p>
           </div>
         </>
