@@ -5,6 +5,7 @@ import io
 
 import azure.functions as func
 import psycopg2
+import psycopg2.extras
 import pdfplumber
 import firebase_admin
 from firebase_admin import credentials, auth
@@ -18,28 +19,51 @@ from shared.chunker import chunk_text
 
 
 # ==================================================
-# APP INIT (PYTHON V2 MODEL)
+# APP INIT — MUST BE AT IMPORT TIME
 # ==================================================
 app = func.FunctionApp()
 
 
 # ==================================================
-# FIREBASE INITIALIZATION (RUNS ONCE)
+# FIREBASE (LAZY INIT — CRITICAL FOR FLEX)
 # ==================================================
-if not firebase_admin._apps:
+_firebase_initialized = False
+
+
+def init_firebase():
+    """
+    Initializes Firebase ONLY when first needed.
+    Prevents Azure Functions from crashing during import/indexing.
+    """
+    global _firebase_initialized
+
+    if _firebase_initialized:
+        return
+
+    project_id = os.getenv("FIREBASE_PROJECT_ID")
+    private_key = os.getenv("FIREBASE_PRIVATE_KEY")
+    client_email = os.getenv("FIREBASE_CLIENT_EMAIL")
+
+    # If vars are missing, skip init (functions still load)
+    if not project_id or not private_key or not client_email:
+        return
+
     cred = credentials.Certificate({
         "type": "service_account",
-        "project_id": os.environ["FIREBASE_PROJECT_ID"],
-        "private_key": os.environ["FIREBASE_PRIVATE_KEY"].replace("\\n", "\n"),
-        "client_email": os.environ["FIREBASE_CLIENT_EMAIL"],
+        "project_id": project_id,
+        "private_key": private_key.replace("\\n", "\n"),
+        "client_email": client_email,
         "token_uri": "https://oauth2.googleapis.com/token",
     })
+
     firebase_admin.initialize_app(cred)
+    _firebase_initialized = True
 
 
 def get_authenticated_user(req: func.HttpRequest):
-    auth_header = req.headers.get("Authorization")
+    init_firebase()
 
+    auth_header = req.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise Exception("Missing Authorization header")
 
@@ -53,13 +77,12 @@ def get_authenticated_user(req: func.HttpRequest):
 
 
 # ==================================================
-# OPENAI CONFIG
+# OPENAI CONFIG (SAFE AT IMPORT)
 # ==================================================
 USE_REAL_AI = os.getenv("USE_REAL_AI", "false").lower() == "true"
-
-openai_client = None
 CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
 
+openai_client = None
 if USE_REAL_AI:
     openai_client = AzureOpenAI(
         api_key=os.getenv("AZURE_OPENAI_KEY"),
@@ -69,13 +92,13 @@ if USE_REAL_AI:
 
 
 # ==================================================
-# HEALTH (PUBLIC)
+# HEALTH (PUBLIC — ALWAYS LOADS)
 # ==================================================
 @app.function_name(name="health")
 @app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def health(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(
-        json.dumps({"status": "ok"}),
+        json.dumps({ "status": "ok" }),
         mimetype="application/json",
     )
 
@@ -88,7 +111,6 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 def list_documents(req: func.HttpRequest) -> func.HttpResponse:
     try:
         user = get_authenticated_user(req)
-        user_id = user["uid"]
     except Exception as e:
         return func.HttpResponse(str(e), status_code=401)
 
@@ -102,7 +124,7 @@ def list_documents(req: func.HttpRequest) -> func.HttpResponse:
         WHERE user_id = %s
         ORDER BY uploaded_at DESC;
         """,
-        (user_id,),
+        (user["uid"],),
     )
 
     docs = cur.fetchall()
@@ -116,14 +138,13 @@ def list_documents(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ==================================================
-# DELETE DOCUMENT (AUTH)
+# DELETE DOCUMENT
 # ==================================================
 @app.function_name(name="delete_document")
 @app.route(route="documents/{document_id}", methods=["DELETE"])
 def delete_document(req: func.HttpRequest) -> func.HttpResponse:
     try:
         user = get_authenticated_user(req)
-        user_id = user["uid"]
     except Exception as e:
         return func.HttpResponse(str(e), status_code=401)
 
@@ -134,7 +155,7 @@ def delete_document(req: func.HttpRequest) -> func.HttpResponse:
 
     cur.execute(
         "DELETE FROM documents WHERE id = %s AND user_id = %s;",
-        (document_id, user_id),
+        (document_id, user["uid"]),
     )
 
     if cur.rowcount == 0:
@@ -150,21 +171,19 @@ def delete_document(req: func.HttpRequest) -> func.HttpResponse:
     conn.close()
 
     return func.HttpResponse(
-        json.dumps({"status": "deleted"}),
+        json.dumps({ "status": "deleted" }),
         mimetype="application/json",
     )
 
 
 # ==================================================
-# UPLOAD DOCUMENT (AUTH)
+# UPLOAD DOCUMENT
 # ==================================================
 @app.function_name(name="upload")
 @app.route(route="upload", methods=["POST"])
 def upload(req: func.HttpRequest) -> func.HttpResponse:
     try:
         user = get_authenticated_user(req)
-        user_id = user["uid"]
-        email = user["email"]
     except Exception as e:
         return func.HttpResponse(str(e), status_code=401)
 
@@ -173,7 +192,6 @@ def upload(req: func.HttpRequest) -> func.HttpResponse:
     msg = BytesParser(policy=default).parsebytes(raw)
 
     file_part = None
-
     for part in msg.iter_parts():
         if part.get_param("name", header="content-disposition") == "file":
             file_part = part
@@ -205,7 +223,7 @@ def upload(req: func.HttpRequest) -> func.HttpResponse:
         VALUES (%s, %s)
         ON CONFLICT (id) DO NOTHING;
         """,
-        (user_id, email),
+        (user["uid"], user["email"]),
     )
 
     cur.execute(
@@ -213,7 +231,7 @@ def upload(req: func.HttpRequest) -> func.HttpResponse:
         INSERT INTO documents (id, user_id, file_name, file_type, blob_path)
         VALUES (%s, %s, %s, %s, %s);
         """,
-        (document_id, user_id, file_name, "pdf", "local"),
+        (document_id, user["uid"], file_name, "pdf", "local"),
     )
 
     for i, chunk in enumerate(chunks):
@@ -241,14 +259,13 @@ def upload(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ==================================================
-# ASK QUESTION (AUTH)
+# ASK QUESTION
 # ==================================================
 @app.function_name(name="ask")
 @app.route(route="ask", methods=["POST"])
 def ask(req: func.HttpRequest) -> func.HttpResponse:
     try:
         user = get_authenticated_user(req)
-        user_id = user["uid"]
     except Exception as e:
         return func.HttpResponse(str(e), status_code=401)
 
@@ -308,7 +325,7 @@ Question:
         INSERT INTO qa_history (user_id, document_id, question, answer)
         VALUES (%s, %s, %s, %s);
         """,
-        (user_id, document_id, question, answer),
+        (user["uid"], document_id, question, answer),
     )
 
     conn.commit()
@@ -322,14 +339,13 @@ Question:
 
 
 # ==================================================
-# HISTORY (AUTH)
+# HISTORY
 # ==================================================
 @app.function_name(name="history")
 @app.route(route="history", methods=["GET"])
 def history(req: func.HttpRequest) -> func.HttpResponse:
     try:
         user = get_authenticated_user(req)
-        user_id = user["uid"]
     except Exception as e:
         return func.HttpResponse(str(e), status_code=401)
 
@@ -344,7 +360,7 @@ def history(req: func.HttpRequest) -> func.HttpResponse:
         WHERE q.user_id = %s
         ORDER BY q.created_at DESC;
         """,
-        (user_id,),
+        (user["uid"],),
     )
 
     rows = cur.fetchall()
@@ -355,6 +371,6 @@ def history(req: func.HttpRequest) -> func.HttpResponse:
         r["created_at"] = r["created_at"].isoformat()
 
     return func.HttpResponse(
-        json.dumps({"history": rows}),
+        json.dumps({ "history": rows }),
         mimetype="application/json",
     )
