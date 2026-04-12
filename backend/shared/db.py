@@ -1,14 +1,17 @@
-import os
+from azure.identity import DefaultAzureCredential
 import psycopg2
-from psycopg2.extras import RealDictCursor
-
-DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_connection():
-    if not DATABASE_URL:
-        raise Exception("DATABASE_URL is not set")
+    credential = DefaultAzureCredential()
+
+    token = credential.get_token(
+        "https://ossrdbms-aad.database.windows.net/.default"
+    ).token
 
     return psycopg2.connect(
-        DATABASE_URL,
-        cursor_factory=RealDictCursor
+        host="docsmart-postgres.postgres.database.azure.com",
+        dbname="docsmartdb",
+        user="docsmart-backend",   #Entra DB role
+        password=token,            #token replaces password
+        sslmode="require"
     )

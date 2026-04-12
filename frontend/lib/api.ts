@@ -10,9 +10,6 @@ if (!baseURL) {
 const api = axios.create({
   baseURL,
   timeout: 30_000,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
 
 // Attach Firebase ID token to every request
