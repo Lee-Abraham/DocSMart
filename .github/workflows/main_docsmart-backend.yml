@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'backend'
   PYTHON_VERSION: '3.11'
 
 jobs:
@@ -31,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Zip artifact for deployment
+      - name: Zip backend for deployment
         run: |
           cd backend
           zip -r ../release.zip .
@@ -61,13 +60,14 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_C7BA32F7F4E848F5B2EAFE5666081386 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8E18E2E940E144C28CFC6BD34FD586B8 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_4B150BF8080C4C38AD268E3A60A737D6 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID }}
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
           app-name: docsmart-backend
           package: .
-          
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false
