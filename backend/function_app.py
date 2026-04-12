@@ -17,21 +17,18 @@ from openai import AzureOpenAI
 from shared.db import get_connection
 from shared.chunker import chunk_text
 
-
 # ==================================================
 # APP INIT
 # ==================================================
 app = func.FunctionApp()
 
-
 # ==================================================
-# FIREBASE (LAZY + SAFE INIT)
+# FIREBASE ADMIN (SAFE + SINGLETON INIT)
 # ==================================================
-_firebase_initialized = False
 
 def init_firebase():
-    global _firebase_initialized
-    if _firebase_initialized:
+    # Initialize once globally
+    if firebase_admin._apps:
         return
 
     project_id = os.getenv("FIREBASE_PROJECT_ID")
@@ -39,20 +36,17 @@ def init_firebase():
     client_email = os.getenv("FIREBASE_CLIENT_EMAIL")
 
     if not project_id or not private_key or not client_email:
-        return
+        raise RuntimeError("Firebase Admin env vars not configured")
 
-    try:
-        cred = credentials.Certificate({
-            "type": "service_account",
-            "project_id": project_id,
-            "private_key": private_key.replace("\\n", "\n"),
-            "client_email": client_email,
-            "token_uri": "https://oauth2.googleapis.com/token",
-        })
-        firebase_admin.initialize_app(cred)
-        _firebase_initialized = True
-    except Exception:
-        pass
+    cred = credentials.Certificate({
+        "type": "service_account",
+        "project_id": project_id,
+        "private_key": private_key.replace("\\n", "\n"),
+        "client_email": client_email,
+        "token_uri": "https://oauth2.googleapis.com/token",
+    })
+
+    firebase_admin.initialize_app(cred)
 
 
 def get_authenticated_user(req: func.HttpRequest):
@@ -63,16 +57,19 @@ def get_authenticated_user(req: func.HttpRequest):
         raise Exception("Missing Authorization header")
 
     token = auth_header.split("Bearer ")[1]
-    decoded = auth.verify_id_token(token)
+
+    try:
+        decoded = auth.verify_id_token(token)
+    except Exception as e:
+        raise Exception(f"Firebase token verification failed: {str(e)}")
 
     return {
         "uid": decoded["uid"],
         "email": decoded.get("email"),
     }
 
-
 # ==================================================
-# OPENAI (LAZY)
+# OPENAI (OPTIONAL, LAZY)
 # ==================================================
 USE_REAL_AI = os.getenv("USE_REAL_AI", "false").lower() == "true"
 CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
@@ -80,33 +77,31 @@ openai_client = None
 
 def init_openai():
     global openai_client
-    if openai_client is not None or not USE_REAL_AI:
+    if openai_client or not USE_REAL_AI:
         return
 
-    try:
-        openai_client = AzureOpenAI(
-            api_key=os.getenv("AZURE_OPENAI_KEY"),
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            api_version="2024-02-15-preview",
-        )
-    except Exception:
-        openai_client = None
-
+    openai_client = AzureOpenAI(
+        api_key=os.getenv("AZURE_OPENAI_KEY"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_version="2024-02-15-preview",
+    )
 
 # ==================================================
-# HEALTH
+# HEALTH CHECK
 # ==================================================
 @app.function_name(name="health")
 @app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def health(req: func.HttpRequest):
-    return func.HttpResponse(json.dumps({"status": "ok"}), mimetype="application/json")
-
+    return func.HttpResponse(
+        json.dumps({"status": "ok"}),
+        mimetype="application/json"
+    )
 
 # ==================================================
 # LIST DOCUMENTS
 # ==================================================
 @app.function_name(name="documents")
-@app.route(route="documents", methods=["GET"])
+@app.route(route="documents", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def list_documents(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
@@ -117,10 +112,12 @@ def list_documents(req: func.HttpRequest):
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     cur.execute(
-        """SELECT id, file_name, file_type, uploaded_at
-           FROM documents
-           WHERE user_id = %s
-           ORDER BY uploaded_at DESC;""",
+        """
+        SELECT id, file_name, file_type, uploaded_at
+        FROM documents
+        WHERE user_id = %s
+        ORDER BY uploaded_at DESC;
+        """,
         (user["uid"],),
     )
 
@@ -133,12 +130,15 @@ def list_documents(req: func.HttpRequest):
 
     return func.HttpResponse(json.dumps(docs), mimetype="application/json")
 
-
 # ==================================================
 # DELETE DOCUMENT
 # ==================================================
 @app.function_name(name="delete_document")
-@app.route(route="documents/{document_id}", methods=["DELETE"])
+@app.route(
+    route="documents/{document_id}",
+    methods=["DELETE"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
 def delete_document(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
@@ -166,25 +166,35 @@ def delete_document(req: func.HttpRequest):
     cur.close()
     conn.close()
 
-    return func.HttpResponse(json.dumps({"status": "deleted"}), mimetype="application/json")
-
+    return func.HttpResponse(
+        json.dumps({"status": "deleted"}),
+        mimetype="application/json"
+    )
 
 # ==================================================
 # UPLOAD DOCUMENT
 # ==================================================
 @app.function_name(name="upload")
-@app.route(route="upload", methods=["POST"])
+@app.route(route="upload", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def upload(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
     except Exception as e:
         return func.HttpResponse(str(e), status_code=401)
 
-    raw = b"Content-Type: " + req.headers.get("content-type").encode() + b"\n\n" + req.get_body()
+    raw = (
+        b"Content-Type: "
+        + req.headers.get("content-type").encode()
+        + b"\n\n"
+        + req.get_body()
+    )
     msg = BytesParser(policy=default).parsebytes(raw)
 
     file_part = next(
-        (p for p in msg.iter_parts() if p.get_param("name", header="content-disposition") == "file"),
+        (
+            p for p in msg.iter_parts()
+            if p.get_param("name", header="content-disposition") == "file"
+        ),
         None
     )
 
@@ -215,14 +225,19 @@ def upload(req: func.HttpRequest):
     )
 
     cur.execute(
-        """INSERT INTO documents (id, user_id, file_name, file_type, blob_path)
-           VALUES (%s, %s, %s, %s, %s);""",
+        """
+        INSERT INTO documents (id, user_id, file_name, file_type, blob_path)
+        VALUES (%s, %s, %s, %s, %s);
+        """,
         (document_id, user["uid"], file_name, "pdf", "local"),
     )
 
     for i, chunk in enumerate(chunks):
         cur.execute(
-            "INSERT INTO document_chunks (document_id, chunk_index, content) VALUES (%s, %s, %s);",
+            """
+            INSERT INTO document_chunks (document_id, chunk_index, content)
+            VALUES (%s, %s, %s);
+            """,
             (document_id, i, chunk),
         )
 
@@ -236,12 +251,11 @@ def upload(req: func.HttpRequest):
         mimetype="application/json",
     )
 
-
 # ==================================================
 # ASK QUESTION
 # ==================================================
 @app.function_name(name="ask")
-@app.route(route="ask", methods=["POST"])
+@app.route(route="ask", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def ask(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
@@ -254,15 +268,22 @@ def ask(req: func.HttpRequest):
 
     conn = get_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
     cur.execute(
-        "SELECT content FROM document_chunks WHERE document_id = %s ORDER BY chunk_index LIMIT 4;",
+        """
+        SELECT content FROM document_chunks
+        WHERE document_id = %s
+        ORDER BY chunk_index
+        LIMIT 4;
+        """,
         (document_id,),
     )
 
     context = "\n\n".join(c["content"] for c in cur.fetchall())
-    init_openai()
 
+    init_openai()
     answer = context
+
     if USE_REAL_AI and openai_client:
         response = openai_client.chat.completions.create(
             model=CHAT_DEPLOYMENT,
@@ -274,8 +295,10 @@ def ask(req: func.HttpRequest):
         answer = response.choices[0].message.content
 
     cur.execute(
-        """INSERT INTO qa_history (user_id, document_id, question, answer)
-           VALUES (%s, %s, %s, %s);""",
+        """
+        INSERT INTO qa_history (user_id, document_id, question, answer)
+        VALUES (%s, %s, %s, %s);
+        """,
         (user["uid"], document_id, question, answer),
     )
 
@@ -283,14 +306,16 @@ def ask(req: func.HttpRequest):
     cur.close()
     conn.close()
 
-    return func.HttpResponse(json.dumps({"question": question, "answer": answer}), mimetype="application/json")
-
+    return func.HttpResponse(
+        json.dumps({"question": question, "answer": answer}),
+        mimetype="application/json",
+    )
 
 # ==================================================
 # HISTORY (LIST)
 # ==================================================
 @app.function_name(name="history")
-@app.route(route="history", methods=["GET"])
+@app.route(route="history", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def history(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
@@ -301,11 +326,13 @@ def history(req: func.HttpRequest):
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     cur.execute(
-        """SELECT q.id, d.file_name, q.question, q.answer, q.created_at
-           FROM qa_history q
-           JOIN documents d ON d.id = q.document_id
-           WHERE q.user_id = %s
-           ORDER BY q.created_at DESC;""",
+        """
+        SELECT q.id, d.file_name, q.question, q.answer, q.created_at
+        FROM qa_history q
+        JOIN documents d ON d.id = q.document_id
+        WHERE q.user_id = %s
+        ORDER BY q.created_at DESC;
+        """,
         (user["uid"],),
     )
 
@@ -316,14 +343,20 @@ def history(req: func.HttpRequest):
     for r in rows:
         r["created_at"] = r["created_at"].isoformat()
 
-    return func.HttpResponse(json.dumps({"history": rows}), mimetype="application/json")
-
+    return func.HttpResponse(
+        json.dumps({"history": rows}),
+        mimetype="application/json",
+    )
 
 # ==================================================
 # DELETE SINGLE HISTORY ITEM
 # ==================================================
 @app.function_name(name="delete_history_item")
-@app.route(route="history/{history_id}", methods=["DELETE"])
+@app.route(
+    route="history/{history_id}",
+    methods=["DELETE"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
 def delete_history_item(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
@@ -334,6 +367,7 @@ def delete_history_item(req: func.HttpRequest):
 
     conn = get_connection()
     cur = conn.cursor()
+
     cur.execute(
         "DELETE FROM qa_history WHERE id = %s AND user_id = %s;",
         (history_id, user["uid"]),
@@ -343,14 +377,16 @@ def delete_history_item(req: func.HttpRequest):
     cur.close()
     conn.close()
 
-    return func.HttpResponse(json.dumps({"status": "deleted"}), mimetype="application/json")
-
+    return func.HttpResponse(
+        json.dumps({"status": "deleted"}),
+        mimetype="application/json",
+    )
 
 # ==================================================
 # CLEAR HISTORY
 # ==================================================
 @app.function_name(name="clear_history")
-@app.route(route="history", methods=["DELETE"])
+@app.route(route="history", methods=["DELETE"], auth_level=func.AuthLevel.ANONYMOUS)
 def clear_history(req: func.HttpRequest):
     try:
         user = get_authenticated_user(req)
@@ -364,4 +400,7 @@ def clear_history(req: func.HttpRequest):
     cur.close()
     conn.close()
 
-    return func.HttpResponse(json.dumps({"status": "cleared"}), mimetype="application/json")
+    return func.HttpResponse(
+        json.dumps({"status": "cleared"}),
+        mimetype="application/json",
+    )

@@ -18,24 +18,17 @@ const GUEST_LIMITS = {
 };
 
 export default function DocumentsClient() {
+  /* ---------- AUTH ---------- */
   const { user, loading: authLoading, isGuest } = useAuth();
   const searchParams = useSearchParams();
 
   const isGuestMode = isGuest || searchParams.get("mode") === "guest";
 
+  /* ---------- STATE ---------- */
   const [documents, setDocuments] = useState<Document[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
-  /* ---------- AUTH GUARD ---------- */
-  if (authLoading) {
-    return <p className="text-textSecondary">Loading session…</p>;
-  }
-
-  if (!user) {
-    return <p>Please sign in.</p>;
-  }
-
-  /* ---------- LOAD DOCUMENTS ---------- */
+  /* ---------- LOAD DOCUMENTS (HOOKS FIRST) ---------- */
   useEffect(() => {
     if (authLoading || !user || isGuestMode) {
       setDataLoading(false);
@@ -73,9 +66,19 @@ export default function DocumentsClient() {
     );
   };
 
+  /* ---------- AUTH GUARDS (AFTER ALL HOOKS) ---------- */
+  if (authLoading) {
+    return <p className="text-textSecondary">Loading session…</p>;
+  }
+
+  if (!user) {
+    return <p>Please sign in.</p>;
+  }
+
+  /* ---------- UI ---------- */
   return (
     <section className="max-w-6xl mx-auto space-y-10">
-      {/* ---------- Header ---------- */}
+      {/* Header */}
       <header className="space-y-1">
         <h1 className="text-3xl font-semibold">Documents</h1>
         <p className="text-sm text-textSecondary">
@@ -83,7 +86,7 @@ export default function DocumentsClient() {
         </p>
       </header>
 
-      {/* ---------- Guest Notice ---------- */}
+      {/* Guest Notice */}
       {isGuestMode && (
         <div className="border border-dashed bg-gray-50 p-4 rounded-lg text-sm">
           You are in <strong>Guest Mode</strong>. Upload one document to try
@@ -95,7 +98,7 @@ export default function DocumentsClient() {
         </div>
       )}
 
-      {/* ---------- Upload Section ---------- */}
+      {/* Upload Section */}
       <UploadSection
         disabled={guestLimitReached}
         isGuest={isGuestMode}
@@ -112,7 +115,7 @@ export default function DocumentsClient() {
         }}
       />
 
-      {/* ---------- Documents Grid ---------- */}
+      {/* Documents Grid */}
       <div className="space-y-4">
         <h2 className="text-xl font-medium">
           Documents You Can Ask Questions About
@@ -135,7 +138,7 @@ export default function DocumentsClient() {
         )}
       </div>
 
-      {/* ---------- Footer ---------- */}
+      {/* Footer */}
       <div className="border-t pt-6 text-sm text-textSecondary space-y-2">
         <p>
           Each document acts as a knowledge source. When you open a document,

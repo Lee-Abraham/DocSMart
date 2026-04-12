@@ -15,24 +15,17 @@ type HistoryItem = {
 };
 
 export default function HistoryClient() {
+  /* ---------- AUTH ---------- */
   const { user, loading: authLoading, isGuest } = useAuth();
   const searchParams = useSearchParams();
 
   const isGuestMode = isGuest || searchParams.get("mode") === "guest";
 
+  /* ---------- STATE ---------- */
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
-  /* ---------- AUTH GUARD ---------- */
-  if (authLoading) {
-    return <p className="text-textSecondary">Loading session…</p>;
-  }
-
-  if (!user) {
-    return <p>Please sign in.</p>;
-  }
-
-  /* ---------- LOAD HISTORY ---------- */
+  /* ---------- LOAD HISTORY (HOOKS FIRST) ---------- */
   useEffect(() => {
     if (authLoading || !user || isGuestMode) {
       setDataLoading(false);
@@ -49,6 +42,7 @@ export default function HistoryClient() {
       .finally(() => setDataLoading(false));
   }, [authLoading, user, isGuestMode]);
 
+  /* ---------- DELETE ---------- */
   const handleDelete = async (historyId: string) => {
     const confirmed = confirm(
       "Remove this question from your history?"
@@ -62,9 +56,19 @@ export default function HistoryClient() {
     );
   };
 
+  /* ---------- AUTH GUARDS (AFTER ALL HOOKS) ---------- */
+  if (authLoading) {
+    return <p className="text-textSecondary">Loading session…</p>;
+  }
+
+  if (!user) {
+    return <p>Please sign in.</p>;
+  }
+
+  /* ---------- UI ---------- */
   return (
     <section className="max-w-4xl mx-auto space-y-8">
-      {/* ---------- Header ---------- */}
+      {/* Header */}
       <header className="space-y-1">
         <h1 className="text-3xl font-semibold">Question History</h1>
         <p className="text-sm text-textSecondary">
@@ -72,7 +76,7 @@ export default function HistoryClient() {
         </p>
       </header>
 
-      {/* ---------- Content ---------- */}
+      {/* Content */}
       {dataLoading ? (
         <p className="text-textSecondary">Loading history…</p>
       ) : history.length === 0 ? (

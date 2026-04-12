@@ -19,25 +19,18 @@ type HistoryItem = {
 };
 
 export default function DashboardClient() {
+  /* ---------- AUTH ---------- */
   const { user, loading: authLoading, isGuest } = useAuth();
   const searchParams = useSearchParams();
 
   const isGuestMode = isGuest || searchParams.get("mode") === "guest";
 
+  /* ---------- STATE ---------- */
   const [documents, setDocuments] = useState<Document[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
-  /* ---------- AUTH GUARD ---------- */
-  if (authLoading) {
-    return <p className="text-textSecondary">Loading session…</p>;
-  }
-
-  if (!user) {
-    return <p>Please sign in.</p>;
-  }
-
-  /* ---------- DATA FETCH ---------- */
+  /* ---------- DATA FETCH (HOOKS MUST BE FIRST) ---------- */
   useEffect(() => {
     if (authLoading || !user || isGuestMode) {
       setDataLoading(false);
@@ -59,6 +52,16 @@ export default function DashboardClient() {
       .finally(() => setDataLoading(false));
   }, [authLoading, user, isGuestMode]);
 
+  /* ---------- AUTH GUARDS (AFTER ALL HOOKS) ---------- */
+  if (authLoading) {
+    return <p className="text-textSecondary">Loading session…</p>;
+  }
+
+  if (!user) {
+    return <p>Please sign in.</p>;
+  }
+
+  /* ---------- UI ---------- */
   return (
     <section className="max-w-6xl mx-auto space-y-10">
       {/* ---------- Header ---------- */}
