@@ -149,7 +149,7 @@ export default function DashboardPage() {
             </p>
 
             <Link
-              href="/ask"
+              href="/documents"
               className="block border rounded-md px-4 py-3 text-textSecondary hover:bg-gray-50 transition"
             >
               <span className="block text-sm">
