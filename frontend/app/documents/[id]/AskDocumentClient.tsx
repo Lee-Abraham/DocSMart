@@ -26,7 +26,7 @@ export default function AskDocumentPage() {
     if (!userId) return;
 
     api
-      .get("/documents", { params: { user_id: userId } })
+      .get("/documents")
       .then((res) => {
         if (Array.isArray(res.data)) {
           const doc = res.data.find((d: any) => d.id === documentId);
@@ -43,7 +43,6 @@ export default function AskDocumentPage() {
     try {
       const res = await api.post("/ask", {
         document_id: documentId,
-        user_id: userId,
         question,
       });
 

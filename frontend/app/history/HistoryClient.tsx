@@ -28,7 +28,7 @@ export default function HistoryPage() {
     if (!userId) return;
 
     api
-      .get("/history", { params: { user_id: userId } })
+      .get("/history")
       .then((res) => {
         setHistory(res.data?.history ?? []);
       })
@@ -42,9 +42,7 @@ export default function HistoryPage() {
     );
     if (!confirmed) return;
 
-    await api.delete(`/history/${historyId}`, {
-      params: { user_id: userId },
-    });
+    await api.delete(`/history/${historyId}`);
 
     //Update UI immediately
     setHistory((prev) =>

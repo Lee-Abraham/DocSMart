@@ -31,9 +31,9 @@ export default function ProfilePage() {
     }
 
     Promise.all([
-      api.get("/user", { params: { user_id: userId } }),
-      api.get("/documents", { params: { user_id: userId } }),
-      api.get("/history", { params: { user_id: userId } }),
+      api.get("/user"),
+      api.get("/documents"),
+      api.get("/history"),
     ])
       .then(([userRes, docsRes, historyRes]) => {
         setProfile(userRes.data);

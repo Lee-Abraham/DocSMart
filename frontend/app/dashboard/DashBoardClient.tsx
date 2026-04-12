@@ -30,14 +30,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!userId || isGuest) {
-      setLoading(false);
-      return;
+    if (!user && !isGuest) {
+      return; // wait for Firebase to hydrate
     }
 
+
     Promise.all([
-      api.get("/documents", { params: { user_id: userId } }),
-      api.get("/history", { params: { user_id: userId } }),
+      api.get("/documents"),
+      api.get("/history"),
     ])
       .then(([docsRes, historyRes]) => {
         if (Array.isArray(docsRes.data)) {

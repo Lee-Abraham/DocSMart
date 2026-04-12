@@ -31,7 +31,7 @@ export default function DocumentsPage() {
     if (!userId) return;
 
   api
-    .get("/documents", { params: { user_id: userId } })
+    .get("/documents")
     .then((res) => {
       if (Array.isArray(res.data)) {
         setDocuments(res.data);
@@ -52,9 +52,7 @@ export default function DocumentsPage() {
     );
     if (!confirmed) return;
 
-    await api.delete(`/documents/${documentId}`, {
-      params: { user_id: userId },
-    });
+    await api.delete(`/documents/${documentId}`);
 
     setDocuments((prev) =>
       prev.filter((doc) => doc.id !== documentId)
@@ -91,7 +89,7 @@ export default function DocumentsPage() {
           onUploaded={() => {
             setLoading(true);
             api
-              .get("/documents", { params: { user_id: userId } })
+              .get("/documents")
               .then((res) => {
                   if (Array.isArray(res.data)) {
                     setDocuments(res.data);
