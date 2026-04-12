@@ -1,2 +1,7 @@
-
+local.settings.json
+.vscode/
+__pycache__/
+__blobstorage__/
+__azurite*
+*.pyc
 venv
