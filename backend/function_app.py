@@ -19,7 +19,7 @@ from shared.chunker import chunk_text
 
 
 # ==================================================
-# APP INIT — MUST NEVER FAIL
+# APP INIT
 # ==================================================
 app = func.FunctionApp()
 
@@ -28,7 +28,6 @@ app = func.FunctionApp()
 # FIREBASE (LAZY + SAFE INIT)
 # ==================================================
 _firebase_initialized = False
-
 
 def init_firebase():
     global _firebase_initialized
@@ -53,7 +52,6 @@ def init_firebase():
         firebase_admin.initialize_app(cred)
         _firebase_initialized = True
     except Exception:
-        # NEVER allow Firebase init to kill function discovery
         pass
 
 
@@ -74,12 +72,11 @@ def get_authenticated_user(req: func.HttpRequest):
 
 
 # ==================================================
-# OPENAI (LAZY + SAFE INIT)
+# OPENAI (LAZY)
 # ==================================================
 USE_REAL_AI = os.getenv("USE_REAL_AI", "false").lower() == "true"
 CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
 openai_client = None
-
 
 def init_openai():
     global openai_client
@@ -97,15 +94,12 @@ def init_openai():
 
 
 # ==================================================
-# HEALTH (PUBLIC)
+# HEALTH
 # ==================================================
 @app.function_name(name="health")
 @app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def health(req: func.HttpRequest):
-    return func.HttpResponse(
-        json.dumps({"status": "ok"}),
-        mimetype="application/json",
-    )
+    return func.HttpResponse(json.dumps({"status": "ok"}), mimetype="application/json")
 
 
 # ==================================================
@@ -123,12 +117,10 @@ def list_documents(req: func.HttpRequest):
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     cur.execute(
-        """
-        SELECT id, file_name, file_type, uploaded_at
-        FROM documents
-        WHERE user_id = %s
-        ORDER BY uploaded_at DESC;
-        """,
+        """SELECT id, file_name, file_type, uploaded_at
+           FROM documents
+           WHERE user_id = %s
+           ORDER BY uploaded_at DESC;""",
         (user["uid"],),
     )
 
@@ -143,6 +135,41 @@ def list_documents(req: func.HttpRequest):
 
 
 # ==================================================
+# DELETE DOCUMENT
+# ==================================================
+@app.function_name(name="delete_document")
+@app.route(route="documents/{document_id}", methods=["DELETE"])
+def delete_document(req: func.HttpRequest):
+    try:
+        user = get_authenticated_user(req)
+    except Exception as e:
+        return func.HttpResponse(str(e), status_code=401)
+
+    document_id = req.route_params.get("document_id")
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM documents WHERE id = %s AND user_id = %s;",
+        (document_id, user["uid"]),
+    )
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        return func.HttpResponse(
+            json.dumps({"error": "Not found or unauthorized"}),
+            status_code=404,
+            mimetype="application/json",
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return func.HttpResponse(json.dumps({"status": "deleted"}), mimetype="application/json")
+
+
+# ==================================================
 # UPLOAD DOCUMENT
 # ==================================================
 @app.function_name(name="upload")
@@ -153,14 +180,13 @@ def upload(req: func.HttpRequest):
     except Exception as e:
         return func.HttpResponse(str(e), status_code=401)
 
-    content_type = req.headers.get("content-type")
-    raw = b"Content-Type: " + content_type.encode() + b"\n\n" + req.get_body()
+    raw = b"Content-Type: " + req.headers.get("content-type").encode() + b"\n\n" + req.get_body()
     msg = BytesParser(policy=default).parsebytes(raw)
 
-    file_part = None
-    for part in msg.iter_parts():
-        if part.get_param("name", header="content-disposition") == "file":
-            file_part = part
+    file_part = next(
+        (p for p in msg.iter_parts() if p.get_param("name", header="content-disposition") == "file"),
+        None
+    )
 
     if not file_part:
         return func.HttpResponse("No file provided", status_code=400)
@@ -184,28 +210,19 @@ def upload(req: func.HttpRequest):
     cur = conn.cursor()
 
     cur.execute(
-        """
-        INSERT INTO users (id, email)
-        VALUES (%s, %s)
-        ON CONFLICT (id) DO NOTHING;
-        """,
+        "INSERT INTO users (id, email) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING;",
         (user["uid"], user["email"]),
     )
 
     cur.execute(
-        """
-        INSERT INTO documents (id, user_id, file_name, file_type, blob_path)
-        VALUES (%s, %s, %s, %s, %s);
-        """,
+        """INSERT INTO documents (id, user_id, file_name, file_type, blob_path)
+           VALUES (%s, %s, %s, %s, %s);""",
         (document_id, user["uid"], file_name, "pdf", "local"),
     )
 
     for i, chunk in enumerate(chunks):
         cur.execute(
-            """
-            INSERT INTO document_chunks (document_id, chunk_index, content)
-            VALUES (%s, %s, %s);
-            """,
+            "INSERT INTO document_chunks (document_id, chunk_index, content) VALUES (%s, %s, %s);",
             (document_id, i, chunk),
         )
 
@@ -214,18 +231,14 @@ def upload(req: func.HttpRequest):
     conn.close()
 
     return func.HttpResponse(
-        json.dumps({
-            "document_id": document_id,
-            "file_name": file_name,
-            "total_chunks": len(chunks),
-        }),
+        json.dumps({"document_id": document_id, "file_name": file_name}),
         status_code=201,
         mimetype="application/json",
     )
 
 
 # ==================================================
-# ASK
+# ASK QUESTION
 # ==================================================
 @app.function_name(name="ask")
 @app.route(route="ask", methods=["POST"])
@@ -239,62 +252,30 @@ def ask(req: func.HttpRequest):
     document_id = body.get("document_id")
     question = body.get("question")
 
-    if not document_id or not question:
-        return func.HttpResponse(
-            json.dumps({"error": "document_id and question required"}),
-            status_code=400,
-            mimetype="application/json",
-        )
-
     conn = get_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
     cur.execute(
-        """
-        SELECT content
-        FROM document_chunks
-        WHERE document_id = %s
-        ORDER BY chunk_index
-        LIMIT 4;
-        """,
+        "SELECT content FROM document_chunks WHERE document_id = %s ORDER BY chunk_index LIMIT 4;",
         (document_id,),
     )
 
-    chunks = cur.fetchall()
-    context = "\n\n".join(c["content"] for c in chunks)
+    context = "\n\n".join(c["content"] for c in cur.fetchall())
+    init_openai()
 
-    if not USE_REAL_AI:
-        answer = context
-    else:
-        init_openai()
-        if openai_client is None:
-            return func.HttpResponse("AI unavailable", status_code=503)
-
-        prompt = f"""
-You are an AI assistant answering ONLY using the document content below.
-
-Document:
-{context}
-
-Question:
-{question}
-"""
+    answer = context
+    if USE_REAL_AI and openai_client:
         response = openai_client.chat.completions.create(
             model=CHAT_DEPLOYMENT,
             messages=[
                 {"role": "system", "content": "Answer using only the document."},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": f"Document:\n{context}\n\nQuestion:\n{question}"},
             ],
-            temperature=0.2,
-            max_tokens=500,
         )
         answer = response.choices[0].message.content
 
     cur.execute(
-        """
-        INSERT INTO qa_history (user_id, document_id, question, answer)
-        VALUES (%s, %s, %s, %s);
-        """,
+        """INSERT INTO qa_history (user_id, document_id, question, answer)
+           VALUES (%s, %s, %s, %s);""",
         (user["uid"], document_id, question, answer),
     )
 
@@ -302,7 +283,85 @@ Question:
     cur.close()
     conn.close()
 
-    return func.HttpResponse(
-        json.dumps({"question": question, "answer": answer}),
-        mimetype="application/json",
+    return func.HttpResponse(json.dumps({"question": question, "answer": answer}), mimetype="application/json")
+
+
+# ==================================================
+# HISTORY (LIST)
+# ==================================================
+@app.function_name(name="history")
+@app.route(route="history", methods=["GET"])
+def history(req: func.HttpRequest):
+    try:
+        user = get_authenticated_user(req)
+    except Exception as e:
+        return func.HttpResponse(str(e), status_code=401)
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        """SELECT q.id, d.file_name, q.question, q.answer, q.created_at
+           FROM qa_history q
+           JOIN documents d ON d.id = q.document_id
+           WHERE q.user_id = %s
+           ORDER BY q.created_at DESC;""",
+        (user["uid"],),
     )
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    for r in rows:
+        r["created_at"] = r["created_at"].isoformat()
+
+    return func.HttpResponse(json.dumps({"history": rows}), mimetype="application/json")
+
+
+# ==================================================
+# DELETE SINGLE HISTORY ITEM
+# ==================================================
+@app.function_name(name="delete_history_item")
+@app.route(route="history/{history_id}", methods=["DELETE"])
+def delete_history_item(req: func.HttpRequest):
+    try:
+        user = get_authenticated_user(req)
+    except Exception as e:
+        return func.HttpResponse(str(e), status_code=401)
+
+    history_id = req.route_params.get("history_id")
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM qa_history WHERE id = %s AND user_id = %s;",
+        (history_id, user["uid"]),
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return func.HttpResponse(json.dumps({"status": "deleted"}), mimetype="application/json")
+
+
+# ==================================================
+# CLEAR HISTORY
+# ==================================================
+@app.function_name(name="clear_history")
+@app.route(route="history", methods=["DELETE"])
+def clear_history(req: func.HttpRequest):
+    try:
+        user = get_authenticated_user(req)
+    except Exception as e:
+        return func.HttpResponse(str(e), status_code=401)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM qa_history WHERE user_id = %s;", (user["uid"],))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return func.HttpResponse(json.dumps({"status": "cleared"}), mimetype="application/json")
