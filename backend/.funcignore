@@ -1,7 +1,15 @@
+# Local Azurite / storage emulator
+__blobstorage__/
+__azurite*
+
+# Local dev
 local.settings.json
 .vscode/
 __pycache__/
-__blobstorage__/
-__azurite*
 *.pyc
-venv
+venv/
+
+# Frontend (already handled)
+frontend/
+frontend/node_modules/
+frontend/dist/
