@@ -81,9 +81,55 @@ export default function ProfileClient() {
         <p className="text-textSecondary">Loading profile…</p>
       ) : (
         <>
-          {/* Account Info */}
-          {/* Usage Summary */}
-          {/* Account Details */}
+          {/* ---------- Account Info ---------- */}
+          <div className="border rounded-xl p-6 bg-white space-y-3">
+            <h2 className="text-lg font-medium">Account Information</h2>
+
+            <div className="text-sm space-y-1">
+              <p>
+                <span className="text-textSecondary">Email:</span>{" "}
+                {user.email ?? "—"}
+              </p>
+
+              <p>
+                <span className="text-textSecondary">Account ID:</span>{" "}
+                {user.uid.slice(0, 8)}…
+              </p>
+
+              <p>
+                <span className="text-textSecondary">Member since:</span>{" "}
+                {profile?.created_at
+                  ? new Date(profile.created_at).toLocaleDateString()
+                  : "—"}
+              </p>
+            </div>
+          </div>
+
+          {/* ---------- Usage Summary ---------- */}
+          <div className="border rounded-xl p-6 bg-white space-y-3">
+            <h2 className="text-lg font-medium">Usage Summary</h2>
+
+            <div className="grid sm:grid-cols-2 gap-4 text-sm">
+              <div className="border rounded-lg p-4">
+                <p className="text-textSecondary">Documents uploaded</p>
+                <p className="text-xl font-semibold">{documentCount}</p>
+              </div>
+
+              <div className="border rounded-lg p-4">
+                <p className="text-textSecondary">Questions asked</p>
+                <p className="text-xl font-semibold">{questionCount}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* ---------- Session Info ---------- */}
+          <div className="border rounded-xl p-6 bg-white space-y-3">
+            <h2 className="text-lg font-medium">Account Details</h2>
+            <p className="text-sm text-textSecondary">
+              Your documents and question history are securely associated with
+              your account and available whenever you sign in.
+            </p>
+          </div>
         </>
       )}
     </section>
