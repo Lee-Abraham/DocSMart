@@ -56,7 +56,7 @@ export default function HistoryClient() {
     );
   };
 
-  /* ---------- AUTH GUARDS (AFTER ALL HOOKS) ---------- */
+  /* ---------- AUTH GUARDS---------- */
   if (authLoading) {
     return <p className="text-textSecondary">Loading session…</p>;
   }
