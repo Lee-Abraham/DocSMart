@@ -43,7 +43,7 @@ export default function RegisterPage() {
         <input
           type="email"
           placeholder="Email"
-          className="w-full border px-4 py-2 rounded"
+          className="w-full border border-black text-black px-4 py-2 rounded"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
@@ -53,7 +53,7 @@ export default function RegisterPage() {
         <input
           type="password"
           placeholder="Password (Min 6 - max 20)"
-          className="w-full border px-4 py-2 rounded"
+          className="w-full border border-black text-black px-4 py-2 rounded"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
