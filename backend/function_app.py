@@ -332,3 +332,34 @@ def clear_history(req: func.HttpRequest):
     conn.close()
 
     return func.HttpResponse(json.dumps({"status": "cleared"}))
+
+@app.route("user", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def get_user(req: func.HttpRequest):
+    user = get_authenticated_user(req)
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT email, created_at
+        FROM users
+        WHERE id = %s;
+    """, (user["uid"],))
+
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return func.HttpResponse(
+            json.dumps({"email": user["email"], "created_at": None}),
+            mimetype="application/json",
+        )
+
+    return func.HttpResponse(
+        json.dumps({
+            "email": row["email"],
+            "created_at": row["created_at"].isoformat(),
+        }),
+        mimetype="application/json",
+    )
