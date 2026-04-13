@@ -54,7 +54,7 @@ export default function LoginPage() {
 
   return (
     <div className="max-w-md mx-auto bg-white border rounded-xl p-8">
-      <h2 className="text-2xl font-semibold mb-6">Login</h2>
+      <h2 className="text-2xl text-black font-semibold mb-6">Login</h2>
 
       <form onSubmit={handleLogin} className="space-y-4" suppressHydrationWarning>
         {error && (
@@ -94,7 +94,7 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          className="w-full bg-black text-white py-2 rounded hover:bg-gray-800"
+          className="w-full text-white bg-black py-2 rounded hover:bg-gray-800"
         >
           Login
         </button>
@@ -102,7 +102,7 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={handleForgotPassword}
-            className="text-sm text-brand hover:underline"
+            className="text-sm text-black text-brand hover:underline"
           >
             Forgot password?
           </button>

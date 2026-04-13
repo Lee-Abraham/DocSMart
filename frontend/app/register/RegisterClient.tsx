@@ -33,7 +33,7 @@ export default function RegisterPage() {
 
   return (
     <div className="max-w-md mx-auto bg-white border rounded-xl p-8">
-      <h2 className="text-2xl font-semibold mb-6">Create Account</h2>
+      <h2 className="text-2xl text-black font-semibold mb-6">Create Account</h2>
 
       <form onSubmit={handleRegister} className="space-y-4">
         {error && (
