@@ -2,11 +2,13 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-
 def get_connection():
+    conn_str = os.environ.get("DATABASE_URL")
+    if not conn_str:
+        raise RuntimeError("DATABASE_URL is not set")
+
     return psycopg2.connect(
-        DATABASE_URL,
+        conn_str,
         sslmode="require",
         cursor_factory=RealDictCursor
     )
