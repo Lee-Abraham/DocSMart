@@ -20,10 +20,10 @@ export default function HomePage() {
         {/* Guest try-out */}
         <div className="pt-2">
           <Link
-            href="/dashboard?mode=guest"
+            href="/register"
             className="text-sm text-textSecondary underline hover:text-textPrimary"
           >
-            Try with a sample document
+            Sign up for free to try it out with your own documents
           </Link>
         </div>
       </div>
