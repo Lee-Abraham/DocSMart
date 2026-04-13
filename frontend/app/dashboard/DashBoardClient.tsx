@@ -88,13 +88,13 @@ export default function DashboardClient() {
       {!isGuestMode && (
         <>
           {/* Ask CTA */}
-          <div className="border rounded-xl p-6 bg-white shadow-sm space-y-3">
+          <div className="border-2 rounded-xl p-6 shadow-sm space-y-3">
             <p className="text-sm text-textSecondary">
               Ask a question about your uploaded documents
             </p>
             <Link
               href="/documents"
-              className="block border rounded-md px-4 py-3 hover:bg-gray-50"
+              className="block border rounded-md px-4 py-3 text-center bg-brand hover:bg-brand/90 transition"
             >
               Ask a question →
             </Link>

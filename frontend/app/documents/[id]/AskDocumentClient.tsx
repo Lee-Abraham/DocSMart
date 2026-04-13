@@ -80,7 +80,7 @@ export default function AskDocumentClient() {
       </header>
 
       {/* Ask Input */}
-      <div className="border rounded-xl p-6 bg-white space-y-4">
+      <div className="border rounded-xl p-6 space-y-4">
         <textarea
           className="w-full border rounded-md p-3 resize-none"
           rows={4}

@@ -29,7 +29,7 @@ export default function UploadSection({
 };
 
   return (
-    <div className="border border-borderSubtle rounded-xl bg-white p-6 space-y-3">
+    <div className="border border-borderSubtle rounded-xl p-6 space-y-3">
       <h2 className="text-lg font-medium">Upload a Document</h2>
 
       <input

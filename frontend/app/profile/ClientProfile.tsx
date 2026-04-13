@@ -67,7 +67,7 @@ export default function ProfileClient() {
       </header>
 
       {isGuestMode ? (
-        <div className="border border-dashed rounded-xl p-8 bg-gray-50 space-y-3">
+        <div className="border border-dashed rounded-xl p-8 space-y-3">
           <h2 className="text-lg font-medium">Guest User</h2>
           <p className="text-sm text-textSecondary">
             You are currently using DocSMART in Guest Mode. Your data may be
@@ -82,7 +82,7 @@ export default function ProfileClient() {
       ) : (
         <>
           {/* ---------- Account Info ---------- */}
-          <div className="border rounded-xl p-6 bg-white space-y-3">
+          <div className="border rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-medium">Account Information</h2>
 
             <div className="text-sm space-y-1">
@@ -106,7 +106,7 @@ export default function ProfileClient() {
           </div>
 
           {/* ---------- Usage Summary ---------- */}
-          <div className="border rounded-xl p-6 bg-white space-y-3">
+          <div className="border rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-medium">Usage Summary</h2>
 
             <div className="grid sm:grid-cols-2 gap-4 text-sm">
@@ -123,7 +123,7 @@ export default function ProfileClient() {
           </div>
 
           {/* ---------- Session Info ---------- */}
-          <div className="border rounded-xl p-6 bg-white space-y-3">
+          <div className="border rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-medium">Account Details</h2>
             <p className="text-sm text-textSecondary">
               Your documents and question history are securely associated with

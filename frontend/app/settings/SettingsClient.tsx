@@ -43,7 +43,7 @@ export default function SettingsClient() {
       </header>
 
       {/* ---------- Account ---------- */}
-      <div className="border rounded-xl p-6 bg-white space-y-4">
+      <div className="border rounded-xl p-6 space-y-4">
         <h2 className="text-lg font-medium">Account</h2>
 
         <div className="text-sm space-y-1">
@@ -74,7 +74,7 @@ export default function SettingsClient() {
       </div>
 
       {/* ---------- Privacy & Data Use ---------- */}
-      <div className="border rounded-xl p-6 bg-white space-y-4">
+      <div className="border rounded-xl p-6 space-y-4">
         <h2 className="text-lg font-medium">Privacy & Data Use</h2>
 
         <p className="text-sm text-textSecondary leading-relaxed">
@@ -104,7 +104,7 @@ export default function SettingsClient() {
       </div>
 
       {/* ---------- Security ---------- */}
-      <div className="border rounded-xl p-6 bg-white space-y-4">
+      <div className="border rounded-xl p-6 space-y-4">
         <h2 className="text-lg font-medium">Security</h2>
 
         <ul className="text-sm text-textSecondary list-disc pl-5 space-y-2">

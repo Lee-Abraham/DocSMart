@@ -88,7 +88,7 @@ export default function DocumentsClient() {
 
       {/* Guest Notice */}
       {isGuestMode && (
-        <div className="border border-dashed bg-gray-50 p-4 rounded-lg text-sm">
+        <div className="border border-dashed p-4 rounded-lg text-sm">
           You are in <strong>Guest Mode</strong>. Upload one document to try
           DocSMART.{" "}
           <Link href="/register" className="text-brand underline">
@@ -162,7 +162,7 @@ function DocumentCard({
   onDelete: (id: string) => void;
 }) {
   return (
-    <div className="bg-white border rounded-xl p-6 space-y-3 flex flex-col justify-between">
+    <div className=" border rounded-xl p-6 space-y-3 flex flex-col justify-between">
       <Link href={`/documents/${document.id}`}>
         <h3 className="font-medium truncate">{document.file_name}</h3>
         <p className="text-xs text-textSecondary">
@@ -172,9 +172,9 @@ function DocumentCard({
 
       <button
         onClick={() => onDelete(document.id)}
-        className="bg-red-600 text-black hover:bg-red-700 rounded-md py-1 text-sm"
+        className="border text-bold hover:bg-red-600 rounded-md py-1 text-sm"
       >
-        Delete
+        Remove
       </button>
     </div>
   );

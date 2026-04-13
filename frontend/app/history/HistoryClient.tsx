@@ -86,7 +86,7 @@ export default function HistoryClient() {
           {history.map((item) => (
             <div
               key={item.id}
-              className="border rounded-xl p-5 bg-white hover:bg-gray-50 transition space-y-2"
+              className="border rounded-xl p-5 transition space-y-2"
             >
               <p className="font-medium">{item.question}</p>
 
@@ -99,7 +99,7 @@ export default function HistoryClient() {
 
               <button
                 onClick={() => handleDelete(item.id)}
-                className="bg-red-500 text-black hover:bg-red-600 rounded-md px-3 py-1 text-sm"
+                className="border border-gray-300 hover:bg-red-500 rounded-md px-3 py-1 text-sm"
               >
                 Remove
               </button>
