@@ -1,6 +1,29 @@
+"use client";
+
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/useAuth";
 
 export default function HomePage() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  const isAuthenticated = !!user && user.emailVerified;
+
+  //Redirect authenticated users to dashboard
+  useEffect(() => {
+    if (!loading && isAuthenticated) {
+      router.push("/dashboard");
+    }
+  }, [loading, isAuthenticated, router]);
+
+  //Prevent content flash while auth state resolves
+  if (loading) return null;
+
+  //return nothing while redirecting
+  if (isAuthenticated) return null;
+
   return (
     <section className="max-w-6xl mx-auto flex flex-col gap-20">
       {/* ================= HERO ================= */}
@@ -17,7 +40,6 @@ export default function HomePage() {
           search and AI‑ready architecture. No more endless scrolling.
         </p>
 
-        {/* Guest try-out */}
         <div className="pt-2">
           <Link
             href="/register"
@@ -44,9 +66,8 @@ export default function HomePage() {
         />
       </div>
 
-      {/* ================= FOOTER NOTE ================= */}
       <p className="text-center text-sm text-textSecondary">
-        Built as a cloud‑native document intelligence platform using Azure and pgvector.
+        Built as a cloud‑native document intelligence platform using Azure.
       </p>
     </section>
   );
@@ -62,21 +83,9 @@ function Feature({
   desc: string;
 }) {
   return (
-    <div
-      className="
-        bg-white
-        border border-borderSubtle
-        rounded-xl
-        p-8
-        text-center
-      "
-    >
-      <h3 className="text-lg font-semibold mb-3 text-textPrimary">
-        {title}
-      </h3>
-      <p className="text-sm leading-relaxed text-textSecondary">
-        {desc}
-      </p>
+    <div className="bg-white border border-borderSubtle rounded-xl p-8 text-center">
+      <h3 className="text-lg font-semibold mb-3 text-textPrimary">{title}</h3>
+      <p className="text-sm leading-relaxed text-textSecondary">{desc}</p>
     </div>
   );
 }
