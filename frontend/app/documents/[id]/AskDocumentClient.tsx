@@ -58,10 +58,7 @@ export default function AskDocumentClient() {
         res.data?.context?.join("\n\n") ??
         "No answer found.";
 
-      setAnswers((prev) => [
-        ...prev,
-        { question, answer: answerText },
-      ]);
+      setAnswers([{ question, answer: answerText }]);
 
       setQuestion("");
     } catch {
